@@ -221,6 +221,22 @@ async def update_playnext_message_with_title(guild_id: int, item: QueueItem, msg
     except Exception:
         pass
 
+def check_same_vc(interaction: discord.Interaction) -> Optional[str]:
+    if not isinstance(interaction.user, discord.Member):
+        return "❌ 서버 안에서만 사용할 수 있어!"
+        
+    user_voice = interaction.user.voice
+    bot_vc = interaction.guild.voice_client
+
+    # 1. 유저가 음성 채널에 아예 없는 경우
+    if not user_voice or not user_voice.channel:
+        return "❌ 먼저 음성 채널에 들어가야 해!"
+    
+    # 2. 봇이 이미 음성 채널에 있는데, 유저랑 다른 채널인 경우
+    if bot_vc and bot_vc.is_connected() and user_voice.channel != bot_vc.channel:
+        return "❌ 봇이랑 같은 음성 채널에 있는 사람만 조종할 수 있어!"
+        
+    return None
 
 @bot.event
 async def on_ready():
@@ -237,19 +253,16 @@ async def on_ready():
 # Command Implementation
 # ======================
 async def play_impl(interaction: discord.Interaction, query: str):
-    await interaction.response.defer(thinking=True)
-
-    if not interaction.user or not isinstance(interaction.user, discord.Member):
-        await interaction.followup.send("멤버 정보가 없어서 처리 불가", ephemeral=True)
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
         return
+
+    await interaction.response.defer(thinking=True)
 
     vc = interaction.guild.voice_client
     if not vc or not vc.is_connected():
-        voice_state = interaction.user.voice
-        if not voice_state or not voice_state.channel:
-            await interaction.followup.send("먼저 음성 채널에 들어가줘", ephemeral=True)
-            return
-        vc = await voice_state.channel.connect()
+        vc = await interaction.user.voice.channel.connect()
 
     state = get_state(interaction.guild.id)
 
@@ -274,10 +287,10 @@ async def play_impl(interaction: discord.Interaction, query: str):
         await start_next_track(interaction.guild, interaction.channel)
 
 async def queue_impl(interaction: discord.Interaction):
+    # 큐 확인은 다른 방에 있어도 볼 수 있게 권한 검사에서 제외
     state = get_state(interaction.guild.id)
 
     lines = []
-
     repeat_status = "🔁 반복 모드: **ON**" if state.repeat else "➡️ 반복 모드: **OFF**"
     lines.append(repeat_status)
 
@@ -299,6 +312,11 @@ async def queue_impl(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 async def skip_impl(interaction: discord.Interaction):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
 
     vc = interaction.guild.voice_client
@@ -310,12 +328,17 @@ async def skip_impl(interaction: discord.Interaction):
     await interaction.followup.send("⏭️ 스킵")
 
 async def stop_impl(interaction: discord.Interaction):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     state = get_state(interaction.guild.id)
     async with state.lock:
         state.queue.clear()
         state.now_playing = None
         state.now_requester = None
-        state.repeat = False 
+        state.repeat = False
 
     vc = interaction.guild.voice_client
     if vc and vc.is_connected():
@@ -325,6 +348,11 @@ async def stop_impl(interaction: discord.Interaction):
     await interaction.response.send_message("⏹️ 정지 + 큐 초기화", ephemeral=True)
 
 async def remove_impl(interaction: discord.Interaction, index: int):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     state = get_state(interaction.guild.id)
 
     async with state.lock:
@@ -350,6 +378,11 @@ async def remove_impl(interaction: discord.Interaction, index: int):
     )
 
 async def clear_impl(interaction: discord.Interaction):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     state = get_state(interaction.guild.id)
 
     async with state.lock:
@@ -362,6 +395,11 @@ async def clear_impl(interaction: discord.Interaction):
     )
 
 async def repeat_impl(interaction: discord.Interaction):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     state = get_state(interaction.guild.id)
 
     async with state.lock:
@@ -374,19 +412,16 @@ async def repeat_impl(interaction: discord.Interaction):
         await interaction.response.send_message("➡️ 반복 모드 **OFF** — 재생 후 큐에서 제거됩니다.", ephemeral=True)
 
 async def playnext_impl(interaction: discord.Interaction, query: str):
-    await interaction.response.defer(thinking=True)
-
-    if not interaction.user or not isinstance(interaction.user, discord.Member):
-        await interaction.followup.send("멤버 정보가 없어서 처리 불가", ephemeral=True)
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
         return
+
+    await interaction.response.defer(thinking=True)
 
     vc = interaction.guild.voice_client
     if not vc or not vc.is_connected():
-        voice_state = interaction.user.voice
-        if not voice_state or not voice_state.channel:
-            await interaction.followup.send("먼저 음성 채널에 들어가줘", ephemeral=True)
-            return
-        vc = await voice_state.channel.connect()
+        vc = await interaction.user.voice.channel.connect()
 
     state = get_state(interaction.guild.id)
 
@@ -410,6 +445,11 @@ async def playnext_impl(interaction: discord.Interaction, query: str):
         await start_next_track(interaction.guild, interaction.channel)
 
 async def volume_impl(interaction: discord.Interaction, level: int):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     if not 0 <= level <= 200:
         await interaction.response.send_message(
             "❌ 볼륨은 0 ~ 200 사이로 설정해줘", ephemeral=True
@@ -428,7 +468,13 @@ async def volume_impl(interaction: discord.Interaction, level: int):
     await interaction.response.send_message(
         f"🔊 볼륨 설정: **{level}%**", ephemeral=True
     )
+
 async def mvfilter_impl(interaction: discord.Interaction):
+    err = check_same_vc(interaction)
+    if err:
+        await interaction.response.send_message(err, ephemeral=True)
+        return
+
     state = get_state(interaction.guild.id)
 
     async with state.lock:
